@@ -109,7 +109,7 @@
                 >
                     <i class="fa-solid fa-bell" :class="flight.alertEnabled ? 'fa-shake' : ''"></i>
                     <!-- Status Indicator (Shows if ID is missing) -->
-                     <span v-if="!lineUser.id" class="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                     <span v-if="!effectiveUserId" class="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
                 </button>
 
                 <!-- Analysis Button -->
@@ -206,6 +206,9 @@
     </div>
     </transition>
 
+    <!-- Modal: Settings (n8n) -->
+    <!-- Settings button removed, this section kept for structure but hidden -->
+
     <!-- Modal: Analysis & History Chart -->
     <transition name="fade">
     <div v-if="showHistory" class="absolute inset-0 bg-white z-50 flex flex-col">
@@ -275,13 +278,16 @@
 
     // Configuration Constants
     const LIFF_ID = '2008400942-wG0GRzGK'; 
+    // Fixed URLs
     const API_WEBHOOK_HISTORY = 'https://ez2.zeabur.app/webhook/get-history';
     const API_WEBHOOK_ALERT = 'https://ez2.zeabur.app/webhook/add-alert';
+    const API_WEBHOOK_DELETE_ALERT = 'https://ez2.zeabur.app/webhook/delete-alert';
 
     createApp({
         data() {
             return {
                 showModal: false,
+                showSettings: false,
                 showHistory: false,
                 loadingHistory: false,
                 historyError: null,
@@ -289,6 +295,7 @@
                 settings: {
                     webhookGetUrl: API_WEBHOOK_HISTORY,
                     webhookAlertUrl: API_WEBHOOK_ALERT,
+                    webhookDeleteAlertUrl: API_WEBHOOK_DELETE_ALERT,
                     lineUserId: '' 
                 },
                 form: { dep: 'TPE', arr: 'NRT', date: '', returnDate: '', targetPrice: 12000 },
@@ -314,28 +321,40 @@
                 return !!this.settings.webhookGetUrl;
             },
             systemStatusText() {
-                if (this.lineUser.id) return '已連線 LINE 帳號';
+                if (this.lineUser.id || this.settings.lineUserId) return '已連線 LINE 帳號';
                 if (this.n8nConfigured) return '已連線查詢系統';
                 return '離線模式';
             },
             systemStatusColor() {
-                if (this.lineUser.id) return 'bg-emerald-400';
+                if (this.lineUser.id || this.settings.lineUserId) return 'bg-emerald-400';
                 if (this.n8nConfigured) return 'bg-blue-400';
                 return 'bg-red-400';
+            },
+            effectiveUserId() {
+                return this.lineUser.id || this.settings.lineUserId;
             }
         },
         mounted() {
             const savedFlights = localStorage.getItem('flightTrackerData');
             if (savedFlights) this.flights = JSON.parse(savedFlights);
             
-            // Always sync settings to fixed URLs
-            this.settings.webhookGetUrl = API_WEBHOOK_HISTORY;
-            this.settings.webhookAlertUrl = API_WEBHOOK_ALERT;
+            const savedSettings = localStorage.getItem('n8nSettings');
+            if (savedSettings) {
+                const parsed = JSON.parse(savedSettings);
+                this.settings = { 
+                    ...this.settings, 
+                    ...parsed, 
+                    webhookGetUrl: API_WEBHOOK_HISTORY, 
+                    webhookAlertUrl: API_WEBHOOK_ALERT,
+                    webhookDeleteAlertUrl: API_WEBHOOK_DELETE_ALERT
+                };
+            }
             
             this.initLiff();
         },
         watch: {
             flights: { deep: true, handler() { localStorage.setItem('flightTrackerData', JSON.stringify(this.flights)); } },
+            settings: { deep: true, handler() { localStorage.setItem('n8nSettings', JSON.stringify(this.settings)); } },
             'form.date': function(newVal) {
                 if (this.form.returnDate && newVal > this.form.returnDate) {
                     this.form.returnDate = newVal;
@@ -350,6 +369,10 @@
                         const profile = await liff.getProfile();
                         this.lineUser.id = profile.userId;
                         this.lineUser.name = profile.displayName;
+                        if(!this.settings.lineUserId) {
+                            this.settings.lineUserId = profile.userId;
+                            this.saveSettings();
+                        }
                     } else if (liff.isInClient()) {
                         liff.login();
                     }
@@ -385,47 +408,59 @@
                     this.flights = this.flights.filter(f => f.id !== id);
                 }
             },
-            
-            // FIX: Toggle Alert logic to prioritize correct profile.userId
+            saveSettings() {
+                localStorage.setItem('n8nSettings', JSON.stringify(this.settings));
+            },
             async toggleAlert(flight) {
-                let currentUserId = this.lineUser.id;
-
-                // 1. If no ID, try to get it via LIFF SDK directly
-                if (!currentUserId && typeof liff !== 'undefined') {
-                    try {
-                        // Check login status first
-                        if (!liff.isLoggedIn()) {
-                            // If not logged in, force login with redirect
-                            if (confirm('為了發送低價通知，需要驗證您的 LINE 身份。\n\n點擊「確定」將進行 LINE 登入驗證。')) {
-                                liff.login({ redirectUri: window.location.href });
-                                return;
-                            } else {
-                                return;
-                            }
-                        }
-                        
-                        // If logged in (or just logged in), get profile
-                        const profile = await liff.getProfile();
-                        this.lineUser.id = profile.userId;
-                        this.lineUser.name = profile.displayName;
-                        currentUserId = profile.userId; // This is the one we want
-                        
-                    } catch (err) {
-                        console.error('LIFF GetProfile Failed:', err);
-                        alert('無法取得 LINE 帳號資訊，請稍後再試。');
-                        return;
-                    }
+                let currentUserId = this.effectiveUserId;
+                
+                if (!currentUserId && typeof liff !== 'undefined' && liff.isInClient()) {
+                     try {
+                         const profile = await liff.getProfile();
+                         this.lineUser.id = profile.userId;
+                         this.lineUser.name = profile.displayName;
+                         currentUserId = profile.userId;
+                     } catch (e) {
+                         console.error('LIFF Profile Error:', e);
+                     }
                 }
 
                 if (!currentUserId) {
-                    alert('無法偵測到 LINE 帳號，請確保在 LINE App 中開啟。');
+                    if (confirm('為了發送低價通知，需要驗證您的 LINE 身份。\n\n點擊「確定」將進行 LINE 登入驗證。')) {
+                        if (typeof liff !== 'undefined') {
+                            liff.login({ redirectUri: window.location.href });
+                        } else {
+                            alert('無法載入 LIFF SDK，請在 LINE 中開啟。');
+                        }
+                    }
                     return;
                 }
                 
-                // Toggle logic
                 if (flight.alertEnabled) {
                      if(confirm('確定要取消此航班的通知嗎？')) {
-                        flight.alertEnabled = false;
+                        try {
+                            const res = await fetch(this.settings.webhookDeleteAlertUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    userId: currentUserId,
+                                    dep: flight.dep,
+                                    arr: flight.arr,
+                                    date: flight.date
+                                })
+                            });
+                            
+                            if (res.ok) {
+                                flight.alertEnabled = false;
+                                alert('已取消訂閱，並從通知清單中移除。');
+                            } else {
+                                throw new Error('API Error');
+                            }
+                        } catch (e) {
+                            console.error(e);
+                            flight.alertEnabled = false; 
+                            alert('已送出取消請求！');
+                        }
                      }
                      return;
                 }
@@ -437,7 +472,7 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            userId: currentUserId, // Uses the accurately fetched ID
+                            userId: currentUserId,
                             userName: this.lineUser.name || 'User',
                             dep: flight.dep,
                             arr: flight.arr,
@@ -455,7 +490,6 @@
                     }
                 } catch (e) {
                     console.error(e);
-                    // Optimistic update for CORS issues (often succeeds on server but fails response in browser)
                     flight.alertEnabled = true; 
                     alert('已送出訂閱請求！');
                 }
@@ -593,4 +627,3 @@
 </script>
 </body>
 </html>
-
