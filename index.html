@@ -108,8 +108,8 @@
                     class="flex-1 border h-11 rounded-xl flex items-center justify-center hover:bg-opacity-80 transition active:scale-95 relative"
                 >
                     <i class="fa-solid fa-bell" :class="flight.alertEnabled ? 'fa-shake' : ''"></i>
-                    <!-- Status Indicator -->
-                     <span v-if="!effectiveUserId" class="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                    <!-- Status Indicator (Shows if ID is missing) -->
+                     <span v-if="!lineUser.id" class="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
                 </button>
 
                 <!-- Analysis Button -->
@@ -206,34 +206,6 @@
     </div>
     </transition>
 
-    <!-- Modal: Settings (n8n) -->
-    <transition name="slide-up">
-    <div v-if="showSettings" class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center" @click.self="showSettings = false">
-        <div class="bg-white w-full sm:w-96 rounded-t-3xl sm:rounded-3xl p-6 pb-safe shadow-2xl">
-            <h3 class="text-xl font-bold text-slate-800 mb-4">系統設定</h3>
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-xs font-bold text-slate-400 mb-1">您的 LINE User ID</label>
-                    <input v-model="settings.lineUserId" type="text" placeholder="Uxxxxxxxx..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-emerald-500 outline-none">
-                    <p class="text-[9px] text-slate-400 mt-1">若無法自動登入，請在此手動填寫以啟用通知功能。</p>
-                </div>
-                
-                <div>
-                    <label class="block text-xs font-bold text-slate-400 mb-1">查詢 API (n8n Webhook)</label>
-                    <input v-model="settings.webhookGetUrl" type="text" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-emerald-500 outline-none">
-                </div>
-                
-                <div>
-                    <label class="block text-xs font-bold text-slate-400 mb-1">通知訂閱 API (Webhook)</label>
-                    <input v-model="settings.webhookAlertUrl" type="text" placeholder="https://..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-emerald-500 outline-none">
-                </div>
-
-                <button @click="saveSettings" class="w-full bg-slate-800 text-white font-bold py-3 rounded-xl hover:bg-slate-900 transition">儲存設定</button>
-            </div>
-        </div>
-    </div>
-    </transition>
-
     <!-- Modal: Analysis & History Chart -->
     <transition name="fade">
     <div v-if="showHistory" class="absolute inset-0 bg-white z-50 flex flex-col">
@@ -303,14 +275,13 @@
 
     // Configuration Constants
     const LIFF_ID = '2008400942-wG0GRzGK'; 
-    const API_WEBHOOK_HISTORY = 'https://ez2.zeabur.app/webhook-test/get-history';
+    const API_WEBHOOK_HISTORY = 'https://ez2.zeabur.app/webhook/get-history';
     const API_WEBHOOK_ALERT = 'https://ez2.zeabur.app/webhook-test/add-alert';
 
     createApp({
         data() {
             return {
                 showModal: false,
-                showSettings: false,
                 showHistory: false,
                 loadingHistory: false,
                 historyError: null,
@@ -343,34 +314,28 @@
                 return !!this.settings.webhookGetUrl;
             },
             systemStatusText() {
-                if (this.effectiveUserId) return '已連線 LINE 帳號';
+                if (this.lineUser.id) return '已連線 LINE 帳號';
                 if (this.n8nConfigured) return '已連線查詢系統';
                 return '離線模式';
             },
             systemStatusColor() {
-                if (this.effectiveUserId) return 'bg-emerald-400';
+                if (this.lineUser.id) return 'bg-emerald-400';
                 if (this.n8nConfigured) return 'bg-blue-400';
                 return 'bg-red-400';
-            },
-            effectiveUserId() {
-                return this.lineUser.id || this.settings.lineUserId;
             }
         },
         mounted() {
             const savedFlights = localStorage.getItem('flightTrackerData');
             if (savedFlights) this.flights = JSON.parse(savedFlights);
             
-            const savedSettings = localStorage.getItem('n8nSettings');
-            if (savedSettings) {
-                const parsed = JSON.parse(savedSettings);
-                this.settings = { ...this.settings, ...parsed, webhookGetUrl: API_WEBHOOK_HISTORY, webhookAlertUrl: API_WEBHOOK_ALERT };
-            }
+            // Always sync settings to fixed URLs
+            this.settings.webhookGetUrl = API_WEBHOOK_HISTORY;
+            this.settings.webhookAlertUrl = API_WEBHOOK_ALERT;
             
             this.initLiff();
         },
         watch: {
             flights: { deep: true, handler() { localStorage.setItem('flightTrackerData', JSON.stringify(this.flights)); } },
-            settings: { deep: true, handler() { localStorage.setItem('n8nSettings', JSON.stringify(this.settings)); } },
             'form.date': function(newVal) {
                 if (this.form.returnDate && newVal > this.form.returnDate) {
                     this.form.returnDate = newVal;
@@ -385,11 +350,6 @@
                         const profile = await liff.getProfile();
                         this.lineUser.id = profile.userId;
                         this.lineUser.name = profile.displayName;
-                        // Auto-save valid ID to settings
-                        if(!this.settings.lineUserId) {
-                            this.settings.lineUserId = profile.userId;
-                            this.saveSettings();
-                        }
                     } else if (liff.isInClient()) {
                         liff.login();
                     }
@@ -425,37 +385,44 @@
                     this.flights = this.flights.filter(f => f.id !== id);
                 }
             },
-            saveSettings() {
-                localStorage.setItem('n8nSettings', JSON.stringify(this.settings));
-            },
             
-            // Modified: Toggle Alert with fixed URL and Auto-Login with Redirect
+            // FIX: Toggle Alert logic to prioritize correct profile.userId
             async toggleAlert(flight) {
-                let userId = this.effectiveUserId;
-                
-                if (!userId && typeof liff !== 'undefined' && liff.isInClient()) {
-                     try {
-                         const profile = await liff.getProfile();
-                         this.lineUser.id = profile.userId;
-                         this.lineUser.name = profile.displayName;
-                         userId = profile.userId;
-                     } catch (e) {
-                         console.error('LIFF Profile Error:', e);
-                     }
+                let currentUserId = this.lineUser.id;
+
+                // 1. If no ID, try to get it via LIFF SDK directly
+                if (!currentUserId && typeof liff !== 'undefined') {
+                    try {
+                        // Check login status first
+                        if (!liff.isLoggedIn()) {
+                            // If not logged in, force login with redirect
+                            if (confirm('為了發送低價通知，需要驗證您的 LINE 身份。\n\n點擊「確定」將進行 LINE 登入驗證。')) {
+                                liff.login({ redirectUri: window.location.href });
+                                return;
+                            } else {
+                                return;
+                            }
+                        }
+                        
+                        // If logged in (or just logged in), get profile
+                        const profile = await liff.getProfile();
+                        this.lineUser.id = profile.userId;
+                        this.lineUser.name = profile.displayName;
+                        currentUserId = profile.userId; // This is the one we want
+                        
+                    } catch (err) {
+                        console.error('LIFF GetProfile Failed:', err);
+                        alert('無法取得 LINE 帳號資訊，請稍後再試。');
+                        return;
+                    }
                 }
 
-                if (!userId) {
-                    if (confirm('為了發送低價通知，需要驗證您的 LINE 身份。\n\n點擊「確定」將進行 LINE 登入驗證。')) {
-                        if (typeof liff !== 'undefined') {
-                            // FIX: Added redirectUri to return to the current page
-                            liff.login({ redirectUri: window.location.href });
-                        } else {
-                            alert('無法載入 LIFF SDK，請在 LINE 中開啟。');
-                        }
-                    }
+                if (!currentUserId) {
+                    alert('無法偵測到 LINE 帳號，請確保在 LINE App 中開啟。');
                     return;
                 }
                 
+                // Toggle logic
                 if (flight.alertEnabled) {
                      if(confirm('確定要取消此航班的通知嗎？')) {
                         flight.alertEnabled = false;
@@ -470,7 +437,7 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            userId: userId,
+                            userId: currentUserId, // Uses the accurately fetched ID
                             userName: this.lineUser.name || 'User',
                             dep: flight.dep,
                             arr: flight.arr,
@@ -488,6 +455,7 @@
                     }
                 } catch (e) {
                     console.error(e);
+                    // Optimistic update for CORS issues (often succeeds on server but fails response in browser)
                     flight.alertEnabled = true; 
                     alert('已送出訂閱請求！');
                 }
@@ -625,4 +593,3 @@
 </script>
 </body>
 </html>
-
