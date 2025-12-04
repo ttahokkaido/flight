@@ -100,16 +100,16 @@
 
             <!-- Action Buttons -->
             <div class="flex justify-between items-center space-x-2">
-                <!-- Notification Toggle -->
+                <!-- Notification Toggle (Main Feature for ID Capture) -->
                 <button @click="toggleAlert(flight)" 
                     :class="[
-                        flight.alertEnabled ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-slate-50 text-slate-400 border-slate-200',
-                        !effectiveUserId ? 'opacity-50 cursor-not-allowed' : ''
+                        flight.alertEnabled ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-slate-50 text-slate-400 border-slate-200'
                     ]" 
-                    class="flex-1 border h-11 rounded-xl flex items-center justify-center hover:bg-opacity-80 transition active:scale-95"
-                    :title="!effectiveUserId ? '請先登入 LINE 或在設定中填寫 ID' : '開啟低價通知'"
+                    class="flex-1 border h-11 rounded-xl flex items-center justify-center hover:bg-opacity-80 transition active:scale-95 relative"
                 >
                     <i class="fa-solid fa-bell" :class="flight.alertEnabled ? 'fa-shake' : ''"></i>
+                    <!-- Status Indicator -->
+                     <span v-if="!effectiveUserId" class="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
                 </button>
 
                 <!-- Analysis Button -->
@@ -275,16 +275,13 @@
 
     // Configuration Constants
     const LIFF_ID = '2008400942-wG0GRzGK'; 
-    // Fixed URL for History
     const API_WEBHOOK_HISTORY = 'https://ez2.zeabur.app/webhook/get-history';
-    // Fixed URL for Alert
     const API_WEBHOOK_ALERT = 'https://ez2.zeabur.app/webhook/add-alert'; 
 
     createApp({
         data() {
             return {
                 showModal: false,
-                showSettings: false,
                 showHistory: false,
                 loadingHistory: false,
                 historyError: null,
@@ -317,12 +314,12 @@
                 return !!this.settings.webhookGetUrl;
             },
             systemStatusText() {
-                if (this.lineUser.id || this.settings.lineUserId) return '已連線 LINE 帳號';
+                if (this.effectiveUserId) return '已連線 LINE 帳號';
                 if (this.n8nConfigured) return '已連線查詢系統';
                 return '離線模式';
             },
             systemStatusColor() {
-                if (this.lineUser.id || this.settings.lineUserId) return 'bg-emerald-400';
+                if (this.effectiveUserId) return 'bg-emerald-400';
                 if (this.n8nConfigured) return 'bg-blue-400';
                 return 'bg-red-400';
             },
@@ -337,7 +334,6 @@
             const savedSettings = localStorage.getItem('n8nSettings');
             if (savedSettings) {
                 const parsed = JSON.parse(savedSettings);
-                // Force fixed URLs even if old settings exist
                 this.settings = { ...this.settings, ...parsed, webhookGetUrl: API_WEBHOOK_HISTORY, webhookAlertUrl: API_WEBHOOK_ALERT };
             }
             
@@ -360,10 +356,13 @@
                         const profile = await liff.getProfile();
                         this.lineUser.id = profile.userId;
                         this.lineUser.name = profile.displayName;
+                        // Auto-save valid ID to settings
                         if(!this.settings.lineUserId) {
                             this.settings.lineUserId = profile.userId;
                             this.saveSettings();
                         }
+                    } else if (liff.isInClient()) {
+                        liff.login();
                     }
                 } catch (err) {
                     console.error('LIFF Init Failed:', err);
@@ -398,23 +397,29 @@
                 }
             },
             saveSettings() {
-                this.showSettings = false;
                 localStorage.setItem('n8nSettings', JSON.stringify(this.settings));
             },
+            
+            // Modified Toggle Alert: Auto-Login logic
             async toggleAlert(flight) {
-                const userId = this.effectiveUserId;
+                // 1. Try to get ID
+                let userId = this.effectiveUserId;
                 
+                // 2. If no ID, force LIFF login
                 if (!userId) {
-                    if (confirm('尚未偵測到 LINE 帳號。您是否要在設定中手動輸入 LINE User ID？')) {
-                        // Since settings button is removed, we prompt input directly if no ID
-                        const manualId = prompt('請輸入您的 LINE User ID:');
-                        if (manualId) {
-                            this.settings.lineUserId = manualId;
-                            this.saveSettings();
+                    if (typeof liff !== 'undefined') {
+                        // If in external browser, this will redirect to LINE login
+                        if (!liff.isLoggedIn()) {
+                            liff.login();
+                            return; // Will reload page after login
                         } else {
-                            return;
+                            // Should have profile if logged in
+                            const profile = await liff.getProfile();
+                            this.lineUser.id = profile.userId;
+                            userId = profile.userId;
                         }
                     } else {
+                        alert('無法載入 LIFF SDK，請在 LINE 中開啟。');
                         return;
                     }
                 }
@@ -433,7 +438,7 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            userId: this.effectiveUserId,
+                            userId: userId,
                             userName: this.lineUser.name || 'User',
                             dep: flight.dep,
                             arr: flight.arr,
@@ -451,10 +456,12 @@
                     }
                 } catch (e) {
                     console.error(e);
+                    // Optimistic UI update
                     flight.alertEnabled = true; 
-                    alert('已送出訂閱請求！(若未收到通知請檢查 n8n 設定)');
+                    alert('已送出訂閱請求！');
                 }
             },
+
             generateAdvice(current, min, max) {
                 const range = max - min;
                 const position = (current - min) / range; 
@@ -526,7 +533,6 @@
                         this.priceMin = Math.min(...prices);
                         this.priceMax = Math.max(...prices);
                         this.latestPrice = formattedData[formattedData.length - 1].price;
-                        
                         this.renderChart(formattedData);
                     } else {
                         this.historyError = 'API 未回傳歷史價格數據。';
