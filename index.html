@@ -100,15 +100,17 @@
 
             <!-- Action Buttons -->
             <div class="flex justify-between items-center space-x-2">
-                <!-- Notification Toggle (Main Feature for ID Capture) -->
+                <!-- Notification Toggle -->
                 <button @click="toggleAlert(flight)" 
                     :class="[
-                        flight.alertEnabled ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-slate-50 text-slate-400 border-slate-200'
+                        flight.alertEnabled ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-slate-50 text-slate-400 border-slate-200',
+                        !effectiveUserId ? 'opacity-50 cursor-not-allowed' : ''
                     ]" 
                     class="flex-1 border h-11 rounded-xl flex items-center justify-center hover:bg-opacity-80 transition active:scale-95 relative"
+                    :title="!effectiveUserId ? '請先登入 LINE 或在設定中填寫 ID' : '開啟低價通知'"
                 >
                     <i class="fa-solid fa-bell" :class="flight.alertEnabled ? 'fa-shake' : ''"></i>
-                    <!-- Status Indicator (Shows if ID is missing) -->
+                    <!-- Status Indicator -->
                      <span v-if="!effectiveUserId" class="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
                 </button>
 
@@ -411,21 +413,22 @@
             saveSettings() {
                 localStorage.setItem('n8nSettings', JSON.stringify(this.settings));
             },
+            // Modified Toggle Alert: Uses fixed userId variable to prevent ReferenceError
             async toggleAlert(flight) {
-                let currentUserId = this.effectiveUserId;
+                let userId = this.effectiveUserId;
                 
-                if (!currentUserId && typeof liff !== 'undefined' && liff.isInClient()) {
+                if (!userId && typeof liff !== 'undefined' && liff.isInClient()) {
                      try {
                          const profile = await liff.getProfile();
                          this.lineUser.id = profile.userId;
                          this.lineUser.name = profile.displayName;
-                         currentUserId = profile.userId;
+                         userId = profile.userId;
                      } catch (e) {
                          console.error('LIFF Profile Error:', e);
                      }
                 }
 
-                if (!currentUserId) {
+                if (!userId) {
                     if (confirm('為了發送低價通知，需要驗證您的 LINE 身份。\n\n點擊「確定」將進行 LINE 登入驗證。')) {
                         if (typeof liff !== 'undefined') {
                             liff.login({ redirectUri: window.location.href });
@@ -443,7 +446,7 @@
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
-                                    userId: currentUserId,
+                                    userId: userId, // Fix: Use local userId variable
                                     dep: flight.dep,
                                     arr: flight.arr,
                                     date: flight.date
@@ -472,7 +475,7 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            userId: currentUserId,
+                            userId: userId, // Fix: Use local userId variable
                             userName: this.lineUser.name || 'User',
                             dep: flight.dep,
                             arr: flight.arr,
