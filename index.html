@@ -206,6 +206,34 @@
     </div>
     </transition>
 
+    <!-- Modal: Settings (n8n) -->
+    <transition name="slide-up">
+    <div v-if="showSettings" class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center" @click.self="showSettings = false">
+        <div class="bg-white w-full sm:w-96 rounded-t-3xl sm:rounded-3xl p-6 pb-safe shadow-2xl">
+            <h3 class="text-xl font-bold text-slate-800 mb-4">系統設定</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 mb-1">您的 LINE User ID</label>
+                    <input v-model="settings.lineUserId" type="text" placeholder="Uxxxxxxxx..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-emerald-500 outline-none">
+                    <p class="text-[9px] text-slate-400 mt-1">若無法自動登入，請在此手動填寫以啟用通知功能。</p>
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 mb-1">查詢 API (n8n Webhook)</label>
+                    <input v-model="settings.webhookGetUrl" type="text" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-emerald-500 outline-none">
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 mb-1">通知訂閱 API (Webhook)</label>
+                    <input v-model="settings.webhookAlertUrl" type="text" placeholder="https://..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-emerald-500 outline-none">
+                </div>
+
+                <button @click="saveSettings" class="w-full bg-slate-800 text-white font-bold py-3 rounded-xl hover:bg-slate-900 transition">儲存設定</button>
+            </div>
+        </div>
+    </div>
+    </transition>
+
     <!-- Modal: Analysis & History Chart -->
     <transition name="fade">
     <div v-if="showHistory" class="absolute inset-0 bg-white z-50 flex flex-col">
@@ -276,12 +304,13 @@
     // Configuration Constants
     const LIFF_ID = '2008400942-wG0GRzGK'; 
     const API_WEBHOOK_HISTORY = 'https://ez2.zeabur.app/webhook/get-history';
-    const API_WEBHOOK_ALERT = 'https://ez2.zeabur.app/webhook/add-alert'; 
+    const API_WEBHOOK_ALERT = 'https://ez2.zeabur.app/webhook/add-alert';
 
     createApp({
         data() {
             return {
                 showModal: false,
+                showSettings: false,
                 showHistory: false,
                 loadingHistory: false,
                 historyError: null,
@@ -400,28 +429,31 @@
                 localStorage.setItem('n8nSettings', JSON.stringify(this.settings));
             },
             
-            // Modified Toggle Alert: Auto-Login logic
+            // Modified: Toggle Alert with fixed URL and Auto-Login with Redirect
             async toggleAlert(flight) {
-                // 1. Try to get ID
                 let userId = this.effectiveUserId;
                 
-                // 2. If no ID, force LIFF login
+                if (!userId && typeof liff !== 'undefined' && liff.isInClient()) {
+                     try {
+                         const profile = await liff.getProfile();
+                         this.lineUser.id = profile.userId;
+                         this.lineUser.name = profile.displayName;
+                         userId = profile.userId;
+                     } catch (e) {
+                         console.error('LIFF Profile Error:', e);
+                     }
+                }
+
                 if (!userId) {
-                    if (typeof liff !== 'undefined') {
-                        // If in external browser, this will redirect to LINE login
-                        if (!liff.isLoggedIn()) {
-                            liff.login();
-                            return; // Will reload page after login
+                    if (confirm('為了發送低價通知，需要驗證您的 LINE 身份。\n\n點擊「確定」將進行 LINE 登入驗證。')) {
+                        if (typeof liff !== 'undefined') {
+                            // FIX: Added redirectUri to return to the current page
+                            liff.login({ redirectUri: window.location.href });
                         } else {
-                            // Should have profile if logged in
-                            const profile = await liff.getProfile();
-                            this.lineUser.id = profile.userId;
-                            userId = profile.userId;
+                            alert('無法載入 LIFF SDK，請在 LINE 中開啟。');
                         }
-                    } else {
-                        alert('無法載入 LIFF SDK，請在 LINE 中開啟。');
-                        return;
                     }
+                    return;
                 }
                 
                 if (flight.alertEnabled) {
@@ -456,12 +488,10 @@
                     }
                 } catch (e) {
                     console.error(e);
-                    // Optimistic UI update
                     flight.alertEnabled = true; 
                     alert('已送出訂閱請求！');
                 }
             },
-
             generateAdvice(current, min, max) {
                 const range = max - min;
                 const position = (current - min) / range; 
