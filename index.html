@@ -36,15 +36,12 @@
         select { background-image: none; }
 
         /* Date Input Placeholder Hack (Fixed for Mobile) */
-        /* 當值為空時，將文字設為透明，讓下方的 span 顯示出來 */
         .date-input-empty {
             color: transparent;
         }
-        /* 隱藏 Webkit 瀏覽器預設的 'yyyy/mm/dd' 提示 */
         .date-input-empty::-webkit-datetime-edit {
             color: transparent;
         }
-        /* 確保日期選擇器圖示仍然可見 (可選) */
         .date-input-empty::-webkit-calendar-picker-indicator {
             opacity: 0.5;
         }
@@ -122,8 +119,7 @@
                     class="flex-1 border h-11 rounded-xl flex items-center justify-center hover:bg-opacity-80 transition active:scale-95 relative"
                 >
                     <i class="fa-solid fa-bell" :class="flight.alertEnabled ? 'fa-shake' : ''"></i>
-                    <!-- Status Indicator -->
-                     <span v-if="!effectiveUserId" class="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                    <span v-if="!effectiveUserId" class="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
                 </button>
 
                 <!-- Analysis Button -->
@@ -186,7 +182,6 @@
 
                 <div>
                     <label class="block text-xs font-bold text-slate-400 mb-1">去程日期</label>
-                    <!-- FIX: Removed dynamic type switching to support mobile 'min' attribute validation -->
                     <div class="relative">
                         <input 
                             v-model="form.date" 
@@ -200,7 +195,6 @@
                 </div>
                 <div>
                     <label class="block text-xs font-bold text-slate-400 mb-1">回程日期 (選填)</label>
-                    <!-- FIX: Removed dynamic type switching to support mobile 'min' attribute validation -->
                     <div class="relative">
                         <input 
                             v-model="form.returnDate" 
@@ -225,11 +219,37 @@
     </transition>
 
     <!-- Modal: Settings (n8n) -->
-    <!-- Settings button removed, this section kept for structure but hidden -->
+    <transition name="slide-up">
+    <div v-if="showSettings" class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center" @click.self="showSettings = false">
+        <div class="bg-white w-full sm:w-96 rounded-t-3xl sm:rounded-3xl p-6 pb-safe shadow-2xl">
+            <h3 class="text-xl font-bold text-slate-800 mb-4">系統設定</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 mb-1">您的 LINE User ID</label>
+                    <input v-model="settings.lineUserId" type="text" placeholder="Uxxxxxxxx..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-emerald-500 outline-none">
+                    <p class="text-[9px] text-slate-400 mt-1">若無法自動登入，請在此手動填寫以啟用通知功能。</p>
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 mb-1">查詢 API (n8n Webhook)</label>
+                    <input v-model="settings.webhookGetUrl" type="text" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-emerald-500 outline-none">
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 mb-1">通知訂閱 API (Webhook)</label>
+                    <input v-model="settings.webhookAlertUrl" type="text" placeholder="https://..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-emerald-500 outline-none">
+                </div>
+
+                <button @click="saveSettings" class="w-full bg-slate-800 text-white font-bold py-3 rounded-xl hover:bg-slate-900 transition">儲存設定</button>
+            </div>
+        </div>
+    </div>
+    </transition>
 
     <!-- Modal: Analysis & History Chart -->
     <transition name="fade">
     <div v-if="showHistory" class="absolute inset-0 bg-white z-50 flex flex-col">
+        <!-- ... (Chart content same as before) ... -->
         <div class="px-6 pt-10 pb-4 flex justify-between items-center bg-white border-b border-slate-100">
             <div>
                 <h3 class="text-xl font-bold text-slate-800">價格分析報告</h3>
@@ -296,13 +316,17 @@
 
     // Configuration Constants
     const LIFF_ID = '2008400942-wG0GRzGK'; 
-    // Fixed URLs
     const API_WEBHOOK_HISTORY = 'https://ez2.zeabur.app/webhook/get-history';
     const API_WEBHOOK_ALERT = 'https://ez2.zeabur.app/webhook/add-alert';
     const API_WEBHOOK_DELETE_ALERT = 'https://ez2.zeabur.app/webhook/delete-alert';
 
     createApp({
         data() {
+            // Fixed: Use local time for minDate calculation
+            const d = new Date();
+            d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+            const localToday = d.toISOString().split('T')[0];
+
             return {
                 showModal: false,
                 showSettings: false,
@@ -329,8 +353,7 @@
                 latestPrice: 0,
                 priceMin: 0,
                 priceMax: 0,
-                minDate: new Date().toISOString().split('T')[0],
-                // dateFocus removed as we don't need it for the CSS hack
+                minDate: localToday // Use local time string
             }
         },
         computed: {
@@ -386,6 +409,7 @@
                         const profile = await liff.getProfile();
                         this.lineUser.id = profile.userId;
                         this.lineUser.name = profile.displayName;
+                        // Auto-save valid ID to settings
                         if(!this.settings.lineUserId) {
                             this.settings.lineUserId = profile.userId;
                             this.saveSettings();
@@ -411,6 +435,15 @@
             },
             saveFlight() {
                 if (!this.form.dep || !this.form.arr || !this.form.date) return alert('請填寫完整資訊');
+                
+                // FIX: Manual validation for mobile date issue
+                if (this.form.date < this.minDate) {
+                    return alert('去程日期不能小於今天！');
+                }
+                if (this.form.returnDate && this.form.returnDate < this.form.date) {
+                    return alert('回程日期不能早於去程日期！');
+                }
+
                 const flightData = { dep: this.form.dep, arr: this.form.arr, date: this.form.date, returnDate: this.form.returnDate, targetPrice: this.form.targetPrice };
                 if (this.isEditing) {
                     const index = this.flights.findIndex(f => f.id === this.editingId);
@@ -429,13 +462,16 @@
                 localStorage.setItem('n8nSettings', JSON.stringify(this.settings));
             },
             
-            // FIX: Ensure name is captured correctly
+            // FIX: Force fresh profile fetch for userName
             async toggleAlert(flight) {
                 let userId = this.effectiveUserId;
                 
-                // Try to fetch fresh profile if name or id is missing
-                if ((!userId || !this.lineUser.name) && typeof liff !== 'undefined' && liff.isInClient()) {
+                if (typeof liff !== 'undefined' && liff.isInClient()) {
                      try {
+                         if (!liff.isLoggedIn()) {
+                             liff.login({ redirectUri: window.location.href });
+                             return;
+                         }
                          const profile = await liff.getProfile();
                          this.lineUser.id = profile.userId;
                          this.lineUser.name = profile.displayName;
@@ -463,7 +499,7 @@
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
-                                    userId: userId,
+                                    userId: userId, 
                                     dep: flight.dep,
                                     arr: flight.arr,
                                     date: flight.date,
@@ -495,7 +531,8 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             userId: userId,
-                            userName: this.lineUser.name || 'User', // Use captured name or default
+                            // Use fresh name if available, fallback to settings or 'User'
+                            userName: this.lineUser.name || 'User', 
                             dep: flight.dep,
                             arr: flight.arr,
                             date: flight.date,
@@ -516,6 +553,7 @@
                     alert('已送出訂閱請求！');
                 }
             },
+            // ... (Rest of methods: viewHistory, renderChart, etc. remain same) ...
             generateAdvice(current, min, max) {
                 const range = max - min;
                 const position = (current - min) / range; 
