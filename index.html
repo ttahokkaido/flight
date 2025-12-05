@@ -181,38 +181,30 @@
                     </div>
                 </div>
 
-                <!-- Outbound Date: Fixed with type="date" + CSS placeholder overlay -->
                 <div>
                     <label class="block text-xs font-bold text-slate-400 mb-1">去程日期</label>
-                    <div class="relative">
-                        <input 
-                            v-model="form.date" 
-                            type="date" 
-                            :class="{'date-input-empty text-transparent': !form.date}"
-                            :min="minDate" 
-                            class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-emerald-500 outline-none relative z-10"
-                        >
-                        <!-- Custom Placeholder Overlay -->
-                        <span v-if="!form.date" class="absolute left-4 top-3 text-gray-400 pointer-events-none z-0">年/月/日</span>
-                    </div>
+                    <input 
+                        v-model="form.date" 
+                        :type="(dateFocus || form.date) ? 'date' : 'text'"
+                        placeholder="年/月/日" 
+                        @focus="dateFocus = true"
+                        @blur="dateFocus = false"
+                        :min="minDate" 
+                        class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-emerald-500 outline-none"
+                    >
                 </div>
-
-                <!-- Return Date: Fixed with type="date" + CSS placeholder overlay -->
                 <div>
                     <label class="block text-xs font-bold text-slate-400 mb-1">回程日期 (選填)</label>
-                    <div class="relative">
-                        <input 
-                            v-model="form.returnDate" 
-                            type="date" 
-                            :class="{'date-input-empty text-transparent': !form.returnDate}"
-                            :min="form.date || minDate" 
-                            class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-emerald-500 outline-none relative z-10"
-                        >
-                        <!-- Custom Placeholder Overlay -->
-                        <span v-if="!form.returnDate" class="absolute left-4 top-3 text-gray-400 pointer-events-none z-0">年/月/日</span>
-                    </div>
+                    <input 
+                        v-model="form.returnDate" 
+                        :type="(returnDateFocus || form.returnDate) ? 'date' : 'text'"
+                        placeholder="年/月/日" 
+                        @focus="returnDateFocus = true"
+                        @blur="returnDateFocus = false"
+                        :min="form.date || minDate" 
+                        class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-emerald-500 outline-none"
+                    >
                 </div>
-
                 <div>
                     <label class="block text-xs font-bold text-slate-400 mb-1">目標價格 (NT$)</label>
                     <input v-model.number="form.targetPrice" type="number" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold focus:ring-2 focus:ring-emerald-500 outline-none">
@@ -226,33 +218,7 @@
     </transition>
 
     <!-- Modal: Settings (n8n) -->
-    <transition name="slide-up">
-    <div v-if="showSettings" class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center" @click.self="showSettings = false">
-        <div class="bg-white w-full sm:w-96 rounded-t-3xl sm:rounded-3xl p-6 pb-safe shadow-2xl">
-            <h3 class="text-xl font-bold text-slate-800 mb-4">系統設定</h3>
-            <div class="space-y-4">
-                <!-- Manual LINE ID Input for Fix -->
-                <div>
-                    <label class="block text-xs font-bold text-slate-400 mb-1">您的 LINE User ID</label>
-                    <input v-model="settings.lineUserId" type="text" placeholder="Uxxxxxxxx..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-emerald-500 outline-none">
-                    <p class="text-[9px] text-slate-400 mt-1">若無法自動登入，請在此手動填寫以啟用通知功能。</p>
-                </div>
-                
-                <div>
-                    <label class="block text-xs font-bold text-slate-400 mb-1">查詢 API (n8n Webhook)</label>
-                    <input v-model="settings.webhookGetUrl" type="text" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-emerald-500 outline-none">
-                </div>
-                
-                <div>
-                    <label class="block text-xs font-bold text-slate-400 mb-1">通知訂閱 API (Webhook)</label>
-                    <input v-model="settings.webhookAlertUrl" type="text" placeholder="https://..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-emerald-500 outline-none">
-                </div>
-
-                <button @click="saveSettings" class="w-full bg-slate-800 text-white font-bold py-3 rounded-xl hover:bg-slate-900 transition">儲存設定</button>
-            </div>
-        </div>
-    </div>
-    </transition>
+    <!-- Settings button removed, this section kept for structure but hidden -->
 
     <!-- Modal: Analysis & History Chart -->
     <transition name="fade">
@@ -456,21 +422,23 @@
             saveSettings() {
                 localStorage.setItem('n8nSettings', JSON.stringify(this.settings));
             },
+            
+            // Modified: Toggle Alert logic with full data payload for deletion
             async toggleAlert(flight) {
-                let currentUserId = this.effectiveUserId;
+                let userId = this.effectiveUserId;
                 
-                if (!currentUserId && typeof liff !== 'undefined' && liff.isInClient()) {
+                if (!userId && typeof liff !== 'undefined' && liff.isInClient()) {
                      try {
                          const profile = await liff.getProfile();
                          this.lineUser.id = profile.userId;
                          this.lineUser.name = profile.displayName;
-                         currentUserId = profile.userId;
+                         userId = profile.userId;
                      } catch (e) {
                          console.error('LIFF Profile Error:', e);
                      }
                 }
 
-                if (!currentUserId) {
+                if (!userId) {
                     if (confirm('為了發送低價通知，需要驗證您的 LINE 身份。\n\n點擊「確定」將進行 LINE 登入驗證。')) {
                         if (typeof liff !== 'undefined') {
                             liff.login({ redirectUri: window.location.href });
@@ -487,11 +455,14 @@
                             const res = await fetch(this.settings.webhookDeleteAlertUrl, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
+                                // UPDATED: Sending full composite key for precise deletion
                                 body: JSON.stringify({
-                                    userId: currentUserId,
+                                    userId: userId,
                                     dep: flight.dep,
                                     arr: flight.arr,
-                                    date: flight.date
+                                    date: flight.date,
+                                    returnDate: flight.returnDate, // Added
+                                    targetPrice: flight.targetPrice // Added
                                 })
                             });
                             
@@ -517,7 +488,7 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            userId: currentUserId,
+                            userId: userId,
                             userName: this.lineUser.name || 'User',
                             dep: flight.dep,
                             arr: flight.arr,
@@ -672,4 +643,3 @@
 </script>
 </body>
 </html>
-
