@@ -35,7 +35,7 @@
         
         select { background-image: none; }
 
-        /* Date Input Placeholder Hack (Fixed for Mobile) */
+        /* Date Input Placeholder Hack */
         .date-input-empty {
             color: transparent;
         }
@@ -44,6 +44,15 @@
         }
         .date-input-empty::-webkit-calendar-picker-indicator {
             opacity: 0.5;
+        }
+
+        /* Toggle Switch */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #10b981;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #10b981;
         }
     </style>
 </head>
@@ -81,7 +90,8 @@
         </div>
 
         <div v-for="flight in flights" :key="flight.id" class="bg-gradient-card p-5 rounded-2xl shadow-sm border border-slate-200 relative group mb-4">
-            <button @click.stop="deleteFlight(flight.id)" class="absolute top-4 right-4 text-slate-300 hover:text-red-400 transition p-2">
+            <!-- Delete Button (Fixed: Logic updated to sync with backend) -->
+            <button @click.stop="deleteFlight(flight.id)" class="absolute top-4 right-4 text-red-400 hover:text-red-600 transition p-2">
                 <i class="fa-solid fa-trash"></i>
             </button>
 
@@ -103,7 +113,19 @@
 
             <!-- Price Info -->
             <div class="mb-4 pb-4 border-b border-slate-100">
-                <p class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">目標價格</p>
+                <div class="flex flex-wrap gap-2 mb-2">
+                    <p class="text-[10px] text-slate-400 uppercase tracking-wider self-center">目標價格</p>
+                    
+                    <!-- Modified: Enlarged LCC Icon -->
+                    <span v-if="flight.acceptLCC === false" class="text-xs bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg font-bold border border-indigo-200 flex items-center">
+                        <i class="fa-solid fa-ban mr-1.5 text-indigo-500"></i>排除廉航
+                    </span>
+                    
+                    <!-- Added: Direct Flight Icon -->
+                    <span v-if="flight.directOnly" class="text-xs bg-sky-50 text-sky-700 px-2.5 py-1 rounded-lg font-bold border border-sky-200 flex items-center">
+                        <i class="fa-solid fa-plane-circle-check mr-1.5 text-sky-500"></i>僅限直飛
+                    </span>
+                </div>
                 <p class="text-2xl font-bold text-slate-800">
                     <span class="text-sm text-slate-400 mr-0.5">NT$</span>{{ flight.targetPrice.toLocaleString() }}
                 </p>
@@ -114,9 +136,11 @@
                 <!-- Notification Toggle -->
                 <button @click="toggleAlert(flight)" 
                     :class="[
-                        flight.alertEnabled ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-slate-50 text-slate-400 border-slate-200'
+                        flight.alertEnabled ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-slate-50 text-slate-400 border-slate-200',
+                        !effectiveUserId ? 'opacity-50 cursor-not-allowed' : ''
                     ]" 
                     class="flex-1 border h-11 rounded-xl flex items-center justify-center hover:bg-opacity-80 transition active:scale-95 relative"
+                    :title="!effectiveUserId ? '請先登入 LINE 或在設定中填寫 ID' : '開啟低價通知'"
                 >
                     <i class="fa-solid fa-bell" :class="flight.alertEnabled ? 'fa-shake' : ''"></i>
                     <span v-if="!effectiveUserId" class="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
@@ -125,11 +149,6 @@
                 <!-- Analysis Button -->
                 <button v-if="n8nConfigured" @click="viewHistory(flight)" class="flex-1 bg-white text-emerald-600 border border-emerald-200 h-11 rounded-xl flex items-center justify-center hover:bg-emerald-50 transition shadow-sm text-sm font-bold active:scale-95">
                     <i class="fa-solid fa-wand-magic-sparkles mr-2"></i> 分析
-                </button>
-                
-                <!-- Edit Button -->
-                <button @click="openEditModal(flight)" class="flex-none w-11 h-11 bg-white border border-slate-200 text-slate-500 rounded-xl flex items-center justify-center hover:bg-slate-50 transition active:scale-95">
-                    <i class="fa-solid fa-pen"></i>
                 </button>
                 
                 <!-- Check Price -->
@@ -141,11 +160,11 @@
         </div>
     </main>
 
-    <!-- Modal: Add/Edit Flight -->
+    <!-- Modal: Add Flight -->
     <transition name="slide-up">
     <div v-if="showModal" class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center" @click.self="showModal = false">
         <div class="bg-white w-full sm:w-96 rounded-t-3xl sm:rounded-3xl p-6 pb-safe shadow-2xl">
-            <h3 class="text-xl font-bold text-slate-800 mb-6">{{ isEditing ? '編輯追蹤設定' : '新增追蹤' }}</h3>
+            <h3 class="text-xl font-bold text-slate-800 mb-6">新增追蹤</h3>
             <div class="space-y-4">
                 <div class="grid grid-cols-2 gap-3">
                     <div>
@@ -210,8 +229,27 @@
                     <label class="block text-xs font-bold text-slate-400 mb-1">目標價格 (NT$)</label>
                     <input v-model.number="form.targetPrice" type="number" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold focus:ring-2 focus:ring-emerald-500 outline-none">
                 </div>
+
+                <!-- Options: Accept LCC & Direct Only -->
+                <div class="flex flex-col space-y-3 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs font-bold text-slate-500">接受廉價航空 (LCC)</label>
+                        <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                            <input type="checkbox" name="toggleLCC" id="toggleLCC" v-model="form.acceptLCC" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
+                            <label for="toggleLCC" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-300 cursor-pointer" :class="{'bg-emerald-400': form.acceptLCC}"></label>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs font-bold text-slate-500">僅限直飛 (No Stops)</label>
+                        <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                            <input type="checkbox" name="toggleDirect" id="toggleDirect" v-model="form.directOnly" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
+                            <label for="toggleDirect" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-300 cursor-pointer" :class="{'bg-emerald-400': form.directOnly}"></label>
+                        </div>
+                    </div>
+                </div>
+
                 <button @click="saveFlight" class="w-full bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg hover:bg-emerald-600 active:scale-95 transition mt-2">
-                    {{ isEditing ? '儲存修改' : '開始追蹤' }}
+                    開始追蹤
                 </button>
             </div>
         </div>
@@ -219,37 +257,11 @@
     </transition>
 
     <!-- Modal: Settings (n8n) -->
-    <transition name="slide-up">
-    <div v-if="showSettings" class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center" @click.self="showSettings = false">
-        <div class="bg-white w-full sm:w-96 rounded-t-3xl sm:rounded-3xl p-6 pb-safe shadow-2xl">
-            <h3 class="text-xl font-bold text-slate-800 mb-4">系統設定</h3>
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-xs font-bold text-slate-400 mb-1">您的 LINE User ID</label>
-                    <input v-model="settings.lineUserId" type="text" placeholder="Uxxxxxxxx..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-emerald-500 outline-none">
-                    <p class="text-[9px] text-slate-400 mt-1">若無法自動登入，請在此手動填寫以啟用通知功能。</p>
-                </div>
-                
-                <div>
-                    <label class="block text-xs font-bold text-slate-400 mb-1">查詢 API (n8n Webhook)</label>
-                    <input v-model="settings.webhookGetUrl" type="text" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-emerald-500 outline-none">
-                </div>
-                
-                <div>
-                    <label class="block text-xs font-bold text-slate-400 mb-1">通知訂閱 API (Webhook)</label>
-                    <input v-model="settings.webhookAlertUrl" type="text" placeholder="https://..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-emerald-500 outline-none">
-                </div>
-
-                <button @click="saveSettings" class="w-full bg-slate-800 text-white font-bold py-3 rounded-xl hover:bg-slate-900 transition">儲存設定</button>
-            </div>
-        </div>
-    </div>
-    </transition>
+    <!-- Hidden -->
 
     <!-- Modal: Analysis & History Chart -->
     <transition name="fade">
     <div v-if="showHistory" class="absolute inset-0 bg-white z-50 flex flex-col">
-        <!-- ... (Chart content same as before) ... -->
         <div class="px-6 pt-10 pb-4 flex justify-between items-center bg-white border-b border-slate-100">
             <div>
                 <h3 class="text-xl font-bold text-slate-800">價格分析報告</h3>
@@ -275,33 +287,64 @@
             <!-- Content -->
             <div v-else>
                 <!-- AI Insight Card -->
-                <div class="bg-emerald-50 rounded-2xl p-5 border border-emerald-100 mb-6 relative overflow-hidden">
+                <div class="bg-emerald-50 rounded-2xl p-4 border border-emerald-100 mb-4 relative overflow-hidden">
                     <div class="absolute top-0 right-0 -mt-4 -mr-4 w-20 h-20 bg-emerald-100 rounded-full blur-2xl"></div>
-                    <h4 class="text-sm font-bold text-emerald-800 mb-3 flex items-center relative z-10"><i class="fa-solid fa-robot mr-2"></i> 購票建議</h4>
+                    
+                    <h4 class="text-sm font-bold text-emerald-800 mb-2 flex items-center relative z-10">
+                        <i class="fa-solid fa-robot mr-2"></i> 購票建議
+                    </h4>
+                    
                     <div class="text-sm text-emerald-900 leading-relaxed relative z-10">
-                        目前最低價 <span class="font-bold text-lg mx-1">${{ latestPrice?.toLocaleString() }}</span> 
-                        <span v-if="latestPrice <= selectedFlight.targetPrice" class="font-bold">低於您的目標！</span>
-                        <span v-else>略高於目標。</span>
-                        <br><br>
-                        <span class="text-xs opacity-80">{{ generateAdvice(latestPrice, priceMin, priceMax) }}</span>
+                        <div class="mb-2">
+                            目前{{ selectedFlight.acceptLCC === false ? '傳統航空' : '' }}最低價 
+                            <span v-if="latestPrice > 0" class="font-bold text-lg mx-1">${{ latestPrice?.toLocaleString() }}</span>
+                            <span v-else class="font-bold text-lg mx-1 text-slate-400">查無資料</span>
+
+                            <span v-if="latestPrice > 0 && latestPrice <= selectedFlight.targetPrice" class="font-bold">低於您的目標！</span>
+                            <span v-else-if="latestPrice > 0">略高於目標。</span>
+                        </div>
+                        <div class="text-xs opacity-90 pt-2 border-t border-emerald-200/50">
+                            {{ generateAdvice(latestPrice, priceMin, priceMax) }}
+                        </div>
                     </div>
                 </div>
 
                 <!-- Quality Attributes -->
-                <div class="grid grid-cols-2 gap-3 mb-6">
-                    <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 text-center">
-                        <p class="text-[10px] text-slate-400 uppercase">價格區間 (30天)</p>
-                        <p class="text-sm font-bold text-slate-700 mt-1">${{ priceMin?.toLocaleString() }} - ${{ priceMax?.toLocaleString() }}</p>
+                <div class="grid grid-cols-2 gap-4 mb-6">
+                    <!-- Price Range Card -->
+                    <div class="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col justify-center text-center h-32">
+                        <p class="text-xs font-medium text-slate-400 uppercase mb-2">廉航價格區間 (60天)</p>
+                        <p class="text-sm font-bold text-slate-700 tracking-tight">
+                            ${{ priceMin?.toLocaleString() }} <br>|<br> ${{ priceMax?.toLocaleString() }}
+                        </p>
                     </div>
-                    <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 text-center">
-                        <p class="text-[10px] text-slate-400 uppercase">CP值評分</p>
-                        <div class="flex justify-center items-center mt-1"><i class="fa-solid fa-star text-amber-400 text-xs mr-1"></i><span class="text-sm font-bold text-slate-700">4.5</span></div>
+                    <!-- Flight Tips Card -->
+                    <div class="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col justify-center items-center h-32">
+                        <p class="text-xs font-medium text-slate-400 uppercase mb-2">航班資訊</p>
+                        <div class="flex flex-col items-center w-full">
+                            <div class="flex items-center justify-center w-full mb-2">
+                                <span class="text-lg font-bold truncate max-w-[110px]" :class="flightInfo?.isLCC ? 'text-amber-600' : 'text-indigo-600'">
+                                    {{ flightInfo?.airline }}
+                                </span>
+                            </div>
+                            
+                            <div class="flex flex-wrap justify-center gap-1.5 mb-2">
+                                <span v-if="flightInfo?.isLCC" class="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded border border-amber-200 font-medium">廉航</span>
+                                <span v-if="flightInfo?.isRedEye" class="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded border border-purple-200 font-medium">紅眼</span>
+                                <span v-if="selectedFlight.directOnly" class="text-[10px] bg-sky-100 text-sky-700 px-2 py-0.5 rounded border border-sky-200 font-medium">直飛</span>
+                            </div>
+                            
+                            <span class="text-sm font-medium flex items-center" :class="flightInfo?.hasBaggage ? 'text-emerald-500' : 'text-rose-500'">
+                                <i :class="flightInfo?.hasBaggage ? 'fa-solid fa-suitcase' : 'fa-solid fa-suitcase-rolling'" class="mr-1.5 text-xs"></i>
+                                {{ flightInfo?.baggageText }}
+                            </span>
+                        </div>
                     </div>
                 </div>
 
                 <!-- Chart -->
                 <div class="mb-2">
-                    <h4 class="text-xs font-bold text-slate-400 mb-3 uppercase tracking-wider">歷史價格走勢</h4>
+                    <h4 class="text-xs font-bold text-slate-400 mb-3 uppercase tracking-wider">廉航歷史價格走勢</h4>
                     <div class="h-48 w-full bg-white rounded-xl border border-slate-100 p-2"><canvas id="priceChart"></canvas></div>
                 </div>
             </div>
@@ -322,7 +365,6 @@
 
     createApp({
         data() {
-            // Fixed: Use local time for minDate calculation
             const d = new Date();
             d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
             const localToday = d.toISOString().split('T')[0];
@@ -340,7 +382,8 @@
                     webhookDeleteAlertUrl: API_WEBHOOK_DELETE_ALERT,
                     lineUserId: '' 
                 },
-                form: { dep: 'TPE', arr: 'NRT', date: '', returnDate: '', targetPrice: 12000 },
+                // Added: directOnly defaults to true
+                form: { dep: 'TPE', arr: 'NRT', date: '', returnDate: '', targetPrice: 12000, acceptLCC: true, directOnly: true },
                 lineUser: { id: null, name: null },
                 airports: {
                     TW: [{code:'TPE',name:'台北 - 桃園'},{code:'TSA',name:'台北 - 松山'},{code:'KHH',name:'高雄 - 小港'}],
@@ -353,9 +396,27 @@
                 latestPrice: 0,
                 priceMin: 0,
                 priceMax: 0,
-                minDate: localToday // Use local time string
+                minDate: localToday,
+                flightInfo: {
+                    airline: '讀取中...',
+                    isLCC: false,
+                    isRedEye: false,
+                    hasBaggage: false,
+                    baggageText: '...'
+                },
+                airlineMapping: {
+                    "China Airlines": "中華航空", "EVA Air": "長榮航空", "STARLUX Airlines": "星宇航空", "Tigerair Taiwan": "台灣虎航",
+                    "Peach": "樂桃航空", "Peach Aviation": "樂桃航空", "Scoot": "酷航", "Jetstar": "捷星航空", "AirAsia": "亞洲航空",
+                    "Thai Lion Air": "泰國獅子航空", "Cathay Pacific": "國泰航空", "Japan Airlines": "日本航空", 
+                    "All Nippon Airways": "全日空 (ANA)", "ANA": "全日空 (ANA)", "Korean Air": "大韓航空", "Asiana": "韓亞航空",
+                    "VietJet Air": "越捷航空", "Batik Air": "巴澤航空", "Hong Kong Express": "香港快運", "HK Express": "香港快運",
+                    "Thai Vietjet Air": "泰國越捷", "Cebu Pacific": "宿霧太平洋", "Malaysia Airlines": "馬來西亞航空",
+                    "Philippine Airlines": "菲律賓航空", "Bamboo Airways": "竹越航空", "Thai Airways": "泰國國際航空"
+                },
+                lccList: ['Tigerair', 'Scoot', 'Peach', 'Jetstar', 'AirAsia', 'VietJet', 'Cebu Pacific', 'Spring Airlines', 'Zipair', 'T\'way', 'Jeju', 'HK Express', 'Lion Air', 'Batik']
             }
         },
+        // ... (Computed & Watch same) ...
         computed: {
             n8nConfigured() {
                 return !!this.settings.webhookGetUrl;
@@ -385,8 +446,8 @@
                     ...this.settings, 
                     ...parsed, 
                     webhookGetUrl: API_WEBHOOK_HISTORY, 
-                    webhookAlertUrl: API_WEBHOOK_ALERT,
-                    webhookDeleteAlertUrl: API_WEBHOOK_DELETE_ALERT
+                    webhookAlertUrl: API_WEBHOOK_ALERT, 
+                    webhookDeleteAlertUrl: API_WEBHOOK_DELETE_ALERT 
                 };
             }
             
@@ -409,7 +470,6 @@
                         const profile = await liff.getProfile();
                         this.lineUser.id = profile.userId;
                         this.lineUser.name = profile.displayName;
-                        // Auto-save valid ID to settings
                         if(!this.settings.lineUserId) {
                             this.settings.lineUserId = profile.userId;
                             this.saveSettings();
@@ -422,51 +482,69 @@
                 }
             },
             openAddModal() {
-                this.isEditing = false;
-                this.editingId = null;
-                this.form = { dep: 'TPE', arr: 'NRT', date: '', returnDate: '', targetPrice: 12000 };
+                // Default directOnly to true
+                this.form = { dep: 'TPE', arr: 'NRT', date: '', returnDate: '', targetPrice: 12000, acceptLCC: true, directOnly: true };
                 this.showModal = true;
             },
-            openEditModal(flight) {
-                this.isEditing = true;
-                this.editingId = flight.id;
-                this.form = { ...flight };
-                this.showModal = true;
-            },
+            // openEditModal Removed
             saveFlight() {
                 if (!this.form.dep || !this.form.arr || !this.form.date) return alert('請填寫完整資訊');
-                
-                // FIX: Manual validation for mobile date issue
                 if (this.form.date < this.minDate) {
                     return alert('去程日期不能小於今天！');
                 }
                 if (this.form.returnDate && this.form.returnDate < this.form.date) {
                     return alert('回程日期不能早於去程日期！');
                 }
+                
+                const flightData = { 
+                    dep: this.form.dep, 
+                    arr: this.form.arr, 
+                    date: this.form.date, 
+                    returnDate: this.form.returnDate, 
+                    targetPrice: this.form.targetPrice,
+                    acceptLCC: this.form.acceptLCC,
+                    directOnly: this.form.directOnly
+                };
 
-                const flightData = { dep: this.form.dep, arr: this.form.arr, date: this.form.date, returnDate: this.form.returnDate, targetPrice: this.form.targetPrice };
-                if (this.isEditing) {
-                    const index = this.flights.findIndex(f => f.id === this.editingId);
-                    if (index !== -1) this.flights[index] = { ...this.flights[index], ...flightData };
-                } else {
-                    this.flights.push({ id: Date.now(), alertEnabled: false, ...flightData });
-                }
+                this.flights.push({ id: Date.now(), alertEnabled: false, ...flightData });
                 this.showModal = false;
             },
-            deleteFlight(id) {
+            // Modified deleteFlight: Sync with backend deletion if alert was enabled
+            async deleteFlight(id) {
+                const flight = this.flights.find(f => f.id === id);
+                if (!flight) return;
+
                 if (confirm('確定刪除此追蹤項目？')) {
+                    if (flight.alertEnabled && this.effectiveUserId) {
+                        // Try to remove alert from backend silently
+                        try {
+                            await fetch(this.settings.webhookDeleteAlertUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ 
+                                    userId: this.effectiveUserId, 
+                                    dep: flight.dep, 
+                                    arr: flight.arr, 
+                                    date: flight.date, 
+                                    returnDate: flight.returnDate, 
+                                    targetPrice: flight.targetPrice,
+                                    acceptLCC: flight.acceptLCC
+                                })
+                            });
+                            console.log('Backend alert removed');
+                        } catch (e) {
+                            console.error('Failed to remove backend alert', e);
+                        }
+                    }
                     this.flights = this.flights.filter(f => f.id !== id);
                 }
             },
             saveSettings() {
                 localStorage.setItem('n8nSettings', JSON.stringify(this.settings));
             },
-            
-            // FIX: Force fresh profile fetch for userName
             async toggleAlert(flight) {
                 let userId = this.effectiveUserId;
-                
-                if (typeof liff !== 'undefined' && liff.isInClient()) {
+                if (!userId && typeof liff !== 'undefined' && liff.isInClient()) {
                      try {
                          if (!liff.isLoggedIn()) {
                              liff.login({ redirectUri: window.location.href });
@@ -476,18 +554,12 @@
                          this.lineUser.id = profile.userId;
                          this.lineUser.name = profile.displayName;
                          userId = profile.userId;
-                     } catch (e) {
-                         console.error('LIFF Profile Error:', e);
-                     }
+                     } catch (e) { console.error('LIFF Profile Error:', e); }
                 }
-
                 if (!userId) {
                     if (confirm('為了發送低價通知，需要驗證您的 LINE 身份。\n\n點擊「確定」將進行 LINE 登入驗證。')) {
-                        if (typeof liff !== 'undefined') {
-                            liff.login({ redirectUri: window.location.href });
-                        } else {
-                            alert('無法載入 LIFF SDK，請在 LINE 中開啟。');
-                        }
+                        if (typeof liff !== 'undefined') { liff.login({ redirectUri: window.location.href }); }
+                        else { alert('無法載入 LIFF SDK，請在 LINE 中開啟。'); }
                     }
                     return;
                 }
@@ -498,22 +570,20 @@
                             const res = await fetch(this.settings.webhookDeleteAlertUrl, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
+                                body: JSON.stringify({ 
                                     userId: userId, 
-                                    dep: flight.dep,
-                                    arr: flight.arr,
-                                    date: flight.date,
+                                    dep: flight.dep, 
+                                    arr: flight.arr, 
+                                    date: flight.date, 
                                     returnDate: flight.returnDate, 
-                                    targetPrice: flight.targetPrice 
+                                    targetPrice: flight.targetPrice, 
+                                    acceptLCC: flight.acceptLCC 
                                 })
                             });
-                            
                             if (res.ok) {
                                 flight.alertEnabled = false;
-                                alert('已取消訂閱，並從通知清單中移除。');
-                            } else {
-                                throw new Error('API Error');
-                            }
+                                alert('已取消訂閱！');
+                            } else { throw new Error('API Error'); }
                         } catch (e) {
                             console.error(e);
                             flight.alertEnabled = false; 
@@ -522,38 +592,59 @@
                      }
                      return;
                 }
-
                 if (!confirm(`確定要訂閱此航班？\n當價格低於 $${flight.targetPrice} 時將透過 LINE 通知您。`)) return;
-
                 try {
                     const res = await fetch(this.settings.webhookAlertUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            userId: userId,
-                            // Use fresh name if available, fallback to settings or 'User'
+                        body: JSON.stringify({ 
+                            userId: userId, 
                             userName: this.lineUser.name || 'User', 
-                            dep: flight.dep,
-                            arr: flight.arr,
-                            date: flight.date,
-                            returnDate: flight.returnDate,
-                            targetPrice: flight.targetPrice
+                            dep: flight.dep, 
+                            arr: flight.arr, 
+                            date: flight.date, 
+                            returnDate: flight.returnDate, 
+                            targetPrice: flight.targetPrice, 
+                            acceptLCC: flight.acceptLCC !== undefined ? flight.acceptLCC : true,
+                            // Added: Send directOnly to backend
+                            directOnly: flight.directOnly
                         })
                     });
-                    
                     if (res.ok) {
                         flight.alertEnabled = true;
-                        alert('✅ 訂閱成功！系統將每日監測此價格。');
-                    } else {
-                        throw new Error('API Error');
-                    }
+                        alert('✅ 訂閱成功！');
+                    } else { throw new Error('API Error'); }
                 } catch (e) {
                     console.error(e);
                     flight.alertEnabled = true; 
                     alert('已送出訂閱請求！');
                 }
             },
-            // ... (Rest of methods: viewHistory, renderChart, etc. remain same) ...
+            
+            checkIsLCC(airlineName) {
+                if (!airlineName) return false;
+                return this.lccList.some(lcc => airlineName.toLowerCase().includes(lcc.toLowerCase()));
+            },
+            checkBaggage(extensions) {
+                if (!extensions || !Array.isArray(extensions)) return false;
+                const feeKeywords = ['baggage for a fee', 'fee', 'pay', 'baggage cost', 'buy'];
+                for (const ext of extensions) {
+                    const lowerExt = ext.toLowerCase();
+                    if (lowerExt.includes('checked baggage')) {
+                         if (feeKeywords.some(k => lowerExt.includes(k))) return false;
+                         return true;
+                    }
+                }
+                return false; 
+            },
+            translateAirline(name) {
+                for (const [eng, cht] of Object.entries(this.airlineMapping)) {
+                    if (name.toLowerCase().includes(eng.toLowerCase())) {
+                        return cht;
+                    }
+                }
+                return name; 
+            },
             generateAdvice(current, min, max) {
                 const range = max - min;
                 const position = (current - min) / range; 
@@ -567,6 +658,8 @@
                 this.showHistory = true;
                 this.loadingHistory = true;
                 this.historyError = null;
+                this.flightInfo = { airline: '讀取中...', isLCC: false, isRedEye: false, hasBaggage: false, baggageText: '...' };
+                this.latestPrice = 0;
 
                 const urlObj = new URL(this.settings.webhookGetUrl);
                 urlObj.searchParams.append('dep', (flight.dep || '').trim());
@@ -578,34 +671,24 @@
                 } else {
                     urlObj.searchParams.append('type', '2'); 
                 }
+                // Added: stops parameter for viewHistory if directOnly is enabled
+                if (flight.directOnly) {
+                    urlObj.searchParams.append('stops', '1');
+                }
                 
                 const targetUrl = urlObj.toString();
                 let data = null;
 
                 try {
                     const res = await fetch(targetUrl);
-                    if (res.ok) {
-                        data = await res.json();
-                    } else {
-                        throw new Error('Direct fetch failed');
-                    }
+                    if (res.ok) data = await res.json();
+                    else throw new Error('Direct fetch failed');
                 } catch (e1) {
                     try {
                         const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
                         const res = await fetch(proxyUrl);
                         if (res.ok) data = await res.json();
-                    } catch (e2) {
-                        try {
-                             const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
-                             const res = await fetch(proxyUrl);
-                             if (res.ok) {
-                                 const json = await res.json();
-                                 data = JSON.parse(json.contents);
-                             }
-                        } catch (e3) {
-                            this.historyError = '無法連線。請檢查 n8n 設定。';
-                        }
-                    }
+                    } catch (e2) { }
                 }
 
                 this.loadingHistory = false;
@@ -624,11 +707,74 @@
                         const prices = formattedData.map(d => d.price);
                         this.priceMin = Math.min(...prices);
                         this.priceMax = Math.max(...prices);
-                        this.latestPrice = formattedData[formattedData.length - 1].price;
                         this.renderChart(formattedData);
                     } else {
                         this.historyError = 'API 未回傳歷史價格數據。';
                     }
+
+                    let allFlights = [];
+                    if (data.best_flights) allFlights = allFlights.concat(data.best_flights);
+                    if (data.other_flights) allFlights = allFlights.concat(data.other_flights);
+                    
+                    let filteredFlights = allFlights;
+                    if (flight.acceptLCC === false) {
+                        filteredFlights = allFlights.filter(offer => {
+                            const airlineName = offer.flights[0].airline || '';
+                            return !this.checkIsLCC(airlineName);
+                        });
+                    }
+                    
+                    let bestFlight = null;
+                    if (filteredFlights.length > 0) {
+                        filteredFlights.sort((a, b) => a.price - b.price);
+                        bestFlight = filteredFlights[0];
+                    } else if (allFlights.length > 0) {
+                        if (flight.acceptLCC !== false) {
+                             allFlights.sort((a, b) => a.price - b.price);
+                             bestFlight = allFlights[0];
+                        }
+                    }
+
+                    if (bestFlight) {
+                        this.latestPrice = bestFlight.price;
+                        let airlineName = bestFlight.flights[0].airline || '未知航空';
+                        const isLCC = this.checkIsLCC(airlineName);
+                        airlineName = this.translateAirline(airlineName);
+                        const extensions = bestFlight.extensions || [];
+                        const segExtensions = bestFlight.flights[0].extensions || [];
+                        const allExtensions = [...extensions, ...segExtensions];
+                        let hasBaggage = this.checkBaggage(allExtensions);
+                        
+                        // FIX: Traditional airlines usually include baggage, so force true if not LCC
+                        if (!isLCC) {
+                            hasBaggage = true;
+                        }
+
+                        let isRedEye = false;
+                        if (bestFlight.flights[0].departure_airport && bestFlight.flights[0].departure_airport.time) {
+                            const depString = bestFlight.flights[0].departure_airport.time;
+                            const hourStr = depString.split(' ')[1]?.split(':')[0];
+                            if (hourStr) {
+                                const hour = parseInt(hourStr, 10);
+                                if (hour >= 23 || hour < 6) {
+                                    isRedEye = true;
+                                }
+                            }
+                        }
+                        this.flightInfo = {
+                            airline: airlineName,
+                            isLCC: isLCC,
+                            isRedEye: isRedEye,
+                            hasBaggage: hasBaggage,
+                            baggageText: hasBaggage ? '含托運行李' : '需加購行李'
+                        };
+                    } else {
+                        this.flightInfo = { airline: '查無符合條件航班', isLCC: false, isRedEye: false, hasBaggage: false, baggageText: '-' };
+                        if(formattedData.length > 0) {
+                             this.latestPrice = formattedData[formattedData.length - 1].price;
+                        }
+                    }
+
                 } else if (!this.historyError) {
                      this.historyError = 'API 回傳空值或格式錯誤';
                 }
