@@ -35,13 +35,18 @@
         
         select { background-image: none; }
 
-        /* Date Input Placeholder Hack */
+        /* Date Input Placeholder Hack (Fixed for Mobile) */
+        /* 當值為空時，將文字設為透明，讓下方的 span 顯示出來 */
         .date-input-empty {
-            color: transparent; /* Hide default placeholder text */
+            color: transparent;
         }
-        /* Hide the default 'mm/dd/yyyy' text in WebKit browsers when empty */
+        /* 隱藏 Webkit 瀏覽器預設的 'yyyy/mm/dd' 提示 */
         .date-input-empty::-webkit-datetime-edit {
             color: transparent;
+        }
+        /* 確保日期選擇器圖示仍然可見 (可選) */
+        .date-input-empty::-webkit-calendar-picker-indicator {
+            opacity: 0.5;
         }
     </style>
 </head>
@@ -112,11 +117,9 @@
                 <!-- Notification Toggle -->
                 <button @click="toggleAlert(flight)" 
                     :class="[
-                        flight.alertEnabled ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-slate-50 text-slate-400 border-slate-200',
-                        !effectiveUserId ? 'opacity-50 cursor-not-allowed' : ''
+                        flight.alertEnabled ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-slate-50 text-slate-400 border-slate-200'
                     ]" 
                     class="flex-1 border h-11 rounded-xl flex items-center justify-center hover:bg-opacity-80 transition active:scale-95 relative"
-                    :title="!effectiveUserId ? '請先登入 LINE 或在設定中填寫 ID' : '開啟低價通知'"
                 >
                     <i class="fa-solid fa-bell" :class="flight.alertEnabled ? 'fa-shake' : ''"></i>
                     <!-- Status Indicator -->
@@ -183,27 +186,31 @@
 
                 <div>
                     <label class="block text-xs font-bold text-slate-400 mb-1">去程日期</label>
-                    <input 
-                        v-model="form.date" 
-                        :type="(dateFocus || form.date) ? 'date' : 'text'"
-                        placeholder="年/月/日" 
-                        @focus="dateFocus = true"
-                        @blur="dateFocus = false"
-                        :min="minDate" 
-                        class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-emerald-500 outline-none"
-                    >
+                    <!-- FIX: Removed dynamic type switching to support mobile 'min' attribute validation -->
+                    <div class="relative">
+                        <input 
+                            v-model="form.date" 
+                            type="date" 
+                            :min="minDate" 
+                            class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-emerald-500 outline-none relative z-10"
+                            :class="{'date-input-empty': !form.date}"
+                        >
+                        <span v-if="!form.date" class="absolute left-4 top-3 text-gray-400 pointer-events-none z-0">年/月/日</span>
+                    </div>
                 </div>
                 <div>
                     <label class="block text-xs font-bold text-slate-400 mb-1">回程日期 (選填)</label>
-                    <input 
-                        v-model="form.returnDate" 
-                        :type="(returnDateFocus || form.returnDate) ? 'date' : 'text'"
-                        placeholder="年/月/日" 
-                        @focus="returnDateFocus = true"
-                        @blur="returnDateFocus = false"
-                        :min="form.date || minDate" 
-                        class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-emerald-500 outline-none"
-                    >
+                    <!-- FIX: Removed dynamic type switching to support mobile 'min' attribute validation -->
+                    <div class="relative">
+                        <input 
+                            v-model="form.returnDate" 
+                            type="date" 
+                            :min="form.date || minDate" 
+                            class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-emerald-500 outline-none relative z-10"
+                            :class="{'date-input-empty': !form.returnDate}"
+                        >
+                        <span v-if="!form.returnDate" class="absolute left-4 top-3 text-gray-400 pointer-events-none z-0">年/月/日</span>
+                    </div>
                 </div>
                 <div>
                     <label class="block text-xs font-bold text-slate-400 mb-1">目標價格 (NT$)</label>
@@ -291,8 +298,8 @@
     const LIFF_ID = '2008400942-wG0GRzGK'; 
     // Fixed URLs
     const API_WEBHOOK_HISTORY = 'https://ez2.zeabur.app/webhook/get-history';
-    const API_WEBHOOK_ALERT = 'https://ez2.zeabur.app/webhook-test/add-alert';
-    const API_WEBHOOK_DELETE_ALERT = 'https://ez2.zeabur.app/webhook-test/delete-alert';
+    const API_WEBHOOK_ALERT = 'https://ez2.zeabur.app/webhook/add-alert';
+    const API_WEBHOOK_DELETE_ALERT = 'https://ez2.zeabur.app/webhook/delete-alert';
 
     createApp({
         data() {
@@ -323,8 +330,7 @@
                 priceMin: 0,
                 priceMax: 0,
                 minDate: new Date().toISOString().split('T')[0],
-                dateFocus: false, 
-                returnDateFocus: false 
+                // dateFocus removed as we don't need it for the CSS hack
             }
         },
         computed: {
@@ -423,11 +429,12 @@
                 localStorage.setItem('n8nSettings', JSON.stringify(this.settings));
             },
             
-            // Modified: Toggle Alert logic with full data payload for deletion
+            // FIX: Ensure name is captured correctly
             async toggleAlert(flight) {
                 let userId = this.effectiveUserId;
                 
-                if (!userId && typeof liff !== 'undefined' && liff.isInClient()) {
+                // Try to fetch fresh profile if name or id is missing
+                if ((!userId || !this.lineUser.name) && typeof liff !== 'undefined' && liff.isInClient()) {
                      try {
                          const profile = await liff.getProfile();
                          this.lineUser.id = profile.userId;
@@ -455,14 +462,13 @@
                             const res = await fetch(this.settings.webhookDeleteAlertUrl, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                // UPDATED: Sending full composite key for precise deletion
                                 body: JSON.stringify({
                                     userId: userId,
                                     dep: flight.dep,
                                     arr: flight.arr,
                                     date: flight.date,
-                                    returnDate: flight.returnDate, // Added
-                                    targetPrice: flight.targetPrice // Added
+                                    returnDate: flight.returnDate, 
+                                    targetPrice: flight.targetPrice 
                                 })
                             });
                             
@@ -489,7 +495,7 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             userId: userId,
-                            userName: this.lineUser.name || 'User',
+                            userName: this.lineUser.name || 'User', // Use captured name or default
                             dep: flight.dep,
                             arr: flight.arr,
                             date: flight.date,
